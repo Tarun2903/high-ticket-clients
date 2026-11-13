@@ -1,23 +1,39 @@
-// Server-side Meta Purchase event – SERVER ONLY. Call it ONLY from the single PENDING -> PAID transition
-// (store.markPaid() === "paid_now"), from the verify route or the webhook, whichever wins the race.
+// Server-side Meta Purchase event – SERVER ONLY. The event_id is derived from the payment id, so the webhook
+// and the browser Pixel share one id and Meta deduplicates them (no database needed for "send once").
 import { sendCapiEvent } from "@/lib/meta";
 import { workshopEventData } from "@/lib/workshop";
-import { redisPaymentStore } from "./store";
 
-export async function trackPurchase(registrationId: string): Promise<void> {
+export const purchaseEventId = (paymentId: string) => `purchase_${paymentId}`;
+
+export async function trackPurchase(p: {
+  paymentId: string;
+  email?: string;
+  phone?: string;
+  name?: string;
+  eventSourceUrl?: string;
+  fbp?: string;
+  fbc?: string;
+}): Promise<void> {
   try {
-    const reg = await redisPaymentStore.getRegistration(registrationId);
-    if (!reg?.purchaseEventId) return;
-    const [firstName, ...rest] = (reg.name ?? "").split(/\s+/);
+    const [firstName, ...rest] = (p.name ?? "").trim().split(/\s+/);
     const r = await sendCapiEvent({
       eventName: "Purchase",
-      eventId: reg.purchaseEventId,
-      eventSourceUrl: reg.eventSourceUrl ?? process.env.NEXT_PUBLIC_SITE_URL ?? "",
-      user: { email: reg.email, phone: reg.phone, firstName, lastName: rest.join(" ") || undefined, fbp: reg.fbp, fbc: reg.fbc },
+      eventId: purchaseEventId(p.paymentId),
+      eventSourceUrl: p.eventSourceUrl || process.env.NEXT_PUBLIC_SITE_URL || "",
+      user: {
+        email: p.email,
+        phone: p.phone,
+        firstName,
+        lastName: rest.join(" ") || undefined,
+        fbp: p.fbp,
+        fbc: p.fbc,
+      },
       customData: workshopEventData(),
     });
-    if (!r.sent) console.warn(JSON.stringify({ scope: "purchase", msg: "CAPI Purchase not sent", registrationId, reason: r.error }));
+    if (!r.sent) console.info(JSON.stringify({ scope: "purchase", msg: "CAPI Purchase not sent", reason: r.error }));
   } catch (err) {
-    console.warn(JSON.stringify({ scope: "purchase", msg: "CAPI Purchase failed", registrationId, error: err instanceof Error ? err.message : String(err) }));
+    console.warn(
+      JSON.stringify({ scope: "purchase", msg: "CAPI Purchase failed", error: err instanceof Error ? err.message : String(err) }),
+    );
   }
 }

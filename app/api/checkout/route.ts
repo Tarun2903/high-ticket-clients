@@ -1,4 +1,4 @@
-// POST /api/checkout – creates (or reuses) the PENDING registration and its Razorpay order.
+// POST /api/checkout – creates (or reuses) the Razorpay order; customer details are stored as order notes.
 // The amount comes from lib/workshop.ts on the server; the browser can't influence it.
 import { NextResponse, type NextRequest } from "next/server";
 import { fbcFromFbclid } from "@/lib/meta";

@@ -117,7 +117,7 @@ function openRazorpay(order: CheckoutOrder, hooks: StartCheckoutHooks): Promise<
       },
       handler: (response: RazorpaySuccess) => {
         paid = true;
-        void confirmWithServer(order.registrationId, response).then(finish);
+        void confirmWithServer(response).then(finish);
       },
     });
 
@@ -131,7 +131,7 @@ function openRazorpay(order: CheckoutOrder, hooks: StartCheckoutHooks): Promise<
 }
 
 /** Sends the popup's success claim to the server; navigates only if the server confirms it. */
-async function confirmWithServer(registrationId: string, r: RazorpaySuccess): Promise<StartCheckoutResult> {
+async function confirmWithServer(r: RazorpaySuccess): Promise<StartCheckoutResult> {
   const delays = [0, 1500, 4000]; // network blips: the payment is real, so keep asking the server
   for (const wait of delays) {
     if (wait) await new Promise((res) => setTimeout(res, wait));
@@ -139,12 +139,12 @@ async function confirmWithServer(registrationId: string, r: RazorpaySuccess): Pr
       const res = await fetch("/api/payments/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ registrationId, ...r }),
+        body: JSON.stringify(r),
       });
       if (res.status === 400 || res.status === 404) break; // rejected: retrying can't help
       if (res.ok || res.status === 202) {
         const data = (await res.json()) as { redirect?: string };
-        window.location.assign(data.redirect ?? `/payment/success?registration=${registrationId}`);
+        window.location.assign(data.redirect ?? `/payment/success?order=${encodeURIComponent(r.razorpay_order_id)}`);
         return { status: "paid" };
       }
     } catch {

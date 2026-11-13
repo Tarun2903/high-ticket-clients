@@ -1,27 +1,24 @@
 // Payment service – SERVER ONLY. Never import this file from a client component.
 //
-// Flow (see also app/api/checkout, app/api/payments/verify, app/api/razorpay/webhook):
-//   1. createCheckoutOrder(): saves a PENDING registration, creates the Razorpay order with the amount
-//      taken from lib/workshop.ts (never from the browser) and returns what Checkout needs.
-//      One registration per person (email+phone): a retry reuses the same registration and order.
-//   2. Browser pays in the Razorpay popup -> POST /api/payments/verify (signature + Razorpay API check).
-//   3. Razorpay -> POST /api/razorpay/webhook is the backup if the tab closed before step 2.
-//   4. Both 2 and 3 flip PENDING -> PAID through the same atomic store.markPaid(), so it happens once.
-//   5. /payment/success only renders for a PAID registration AND a matching signed access cookie.
-import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+// No database: Razorpay is the system of record.
+//   1. createCheckoutOrder(): creates a Razorpay order for the workshop price (taken from lib/workshop.ts, never from
+//      the browser) and stores the customer's name / email / phone / UTM as order notes, so they show up in the
+//      Razorpay dashboard next to the payment. One person (email+phone) maps to one order via a deterministic
+//      `receipt`, so retries reuse the same unpaid order and an already-paid person can't pay twice.
+//   2. The browser pays in the Razorpay popup -> POST /api/payments/verify (signature + Razorpay API check).
+//   3. Razorpay -> POST /api/razorpay/webhook confirms captures/failures independently of the browser.
+//   4. /payment/success renders only with a signed cookie from step 2 AND a live "captured" check with Razorpay.
+import { createHash } from "node:crypto";
 import type { RegistrationDetails } from "@/lib/registration";
 import type { Attribution } from "@/lib/tracking/attribution";
 import { workshop } from "@/lib/workshop";
-import {
-  claimRegistrationKey,
-  findRegistrationIdByKey,
-  linkOrder,
-  redisConfigured,
-  redisPaymentStore,
-  saveRegistration,
-  type RegistrationRecord,
-} from "./store";
+import { createAccessToken as signAccess, readAccessToken } from "./access";
+import { createOrder, fetchOrder, fetchPayment, listOrdersByReceipt, orderNotes, paymentConfig, updateOrderNotes } from "./razorpay";
+import { checkPayment, PRODUCT } from "./verify";
+import { purchaseEventId } from "./purchase";
 import type { CheckoutOrder, VerifiedRegistration } from "./types";
+
+export { paymentConfig, fetchOrder, fetchPayment };
 
 export class PaymentsUnavailableError extends Error {
   constructor(message = "Online payments are not enabled yet.") {
@@ -30,7 +27,7 @@ export class PaymentsUnavailableError extends Error {
   }
 }
 
-/** The same person (email + phone) already has a PAID registration. Never charge twice. */
+/** The same person (email + phone) has already paid. Never charge twice. */
 export class AlreadyRegisteredError extends Error {
   constructor() {
     super("This email / phone number is already registered.");
@@ -38,52 +35,20 @@ export class AlreadyRegisteredError extends Error {
   }
 }
 
-export function paymentConfig() {
-  return {
-    enabled: process.env.PAYMENTS_ENABLED === "true",
-    keyId: process.env.RAZORPAY_KEY_ID ?? "",
-    keySecret: process.env.RAZORPAY_KEY_SECRET ?? "",
-    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET ?? "",
-  };
-}
-
 export function paymentsEnabled(): boolean {
   const c = paymentConfig();
-  // Redis is required to record registrations/payments; without it, refuse cleanly instead of failing mid-checkout.
-  return c.enabled && Boolean(c.keyId && c.keySecret) && redisConfigured();
+  return c.enabled && Boolean(c.keyId && c.keySecret);
 }
 
-// ---- Razorpay REST API (server only, Basic auth with key_id:key_secret) ----------------------
-
-async function razorpayApi<T>(path: string, init?: { method: "POST"; body: unknown }): Promise<T> {
-  const { keyId, keySecret } = paymentConfig();
-  const res = await fetch(`https://api.razorpay.com/v1${path}`, {
-    method: init?.method ?? "GET",
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString("base64")}`,
-      ...(init ? { "Content-Type": "application/json" } : {}),
-    },
-    body: init ? JSON.stringify(init.body) : undefined,
-    signal: AbortSignal.timeout(10_000),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`Razorpay ${path} responded ${res.status}`);
-  return (await res.json()) as T;
-}
-
-export type RazorpayPayment = { id: string; order_id: string; amount: number; currency: string; status: string };
-
-export function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPayment> {
-  return razorpayApi<RazorpayPayment>(`/payments/${encodeURIComponent(paymentId)}`);
-}
+export const EXPECTED = { amountPaise: workshop.pricePaise, currency: workshop.currency } as const;
 
 // ---- Checkout --------------------------------------------------------------------------------
 
 export type CheckoutContext = { eventSourceUrl?: string; fbp?: string; fbc?: string };
 
-/** Stable per-person key so double-clicks, reloads and retries never create a second registration. */
-export function registrationKey(details: RegistrationDetails): string {
-  return createHash("sha256").update(`${details.email.trim().toLowerCase()}|${details.phone}`).digest("hex");
+/** Deterministic per-person order key (Razorpay receipts are limited to 40 characters). */
+export function receiptFor(details: RegistrationDetails): string {
+  return createHash("sha256").update(`${details.email.trim().toLowerCase()}|${details.phone}`).digest("hex").slice(0, 40);
 }
 
 export async function createCheckoutOrder(
@@ -94,117 +59,89 @@ export async function createCheckoutOrder(
   if (!paymentsEnabled()) throw new PaymentsUnavailableError();
   const { keyId } = paymentConfig();
 
-  const key = registrationKey(details);
-  const candidateId = randomUUID();
-  const owned = await claimRegistrationKey(key, candidateId);
-  const registrationId = owned ? candidateId : ((await findRegistrationIdByKey(key)) ?? candidateId);
+  const receipt = receiptFor(details);
+  const notes = buildNotes(details, attribution, ctx);
 
-  let existing: RegistrationRecord | null = null;
-  if (!owned) {
-    existing = await redisPaymentStore.getRegistration(registrationId);
-    if (existing?.status === "PAID") throw new AlreadyRegisteredError();
-  }
+  const existing = (await listOrdersByReceipt(receipt)).filter((o) => orderNotes(o).product === PRODUCT);
+  if (existing.some((o) => o.status === "paid")) throw new AlreadyRegisteredError();
 
-  // Newest details win (e.g. a corrected name). Status/amount/ids are never overwritten here.
-  await saveRegistration({
-    registrationId,
-    ...(existing ? {} : { status: "PENDING" as const, amountPaise: workshop.pricePaise, currency: workshop.currency }),
-    ...(existing ? {} : { purchaseEventId: randomUUID(), createdAt: new Date().toISOString() }),
-    name: details.name,
-    email: details.email,
-    phone: details.phone,
-    eventSourceUrl: ctx.eventSourceUrl,
-    fbp: ctx.fbp,
-    fbc: ctx.fbc,
-    attribution: JSON.stringify(attribution),
-  });
-
-  // Retry of an unpaid registration: reuse its order (Razorpay lets a customer retry on the same order).
-  let orderId = existing?.orderId;
-  if (!orderId) {
-    const order = await razorpayApi<{ id: string }>("/orders", {
-      method: "POST",
-      body: {
-        amount: workshop.pricePaise,
-        currency: workshop.currency,
-        receipt: registrationId, // lets the webhook find the registration even without the order link
-        notes: { registration_id: registrationId, ...utmNotes(attribution) },
-      },
-    });
-    orderId = order.id;
-    await linkOrder(orderId, registrationId);
+  // Reuse an unpaid order for the same person (retry / reload / double click); otherwise create one.
+  let orderId = existing.find((o) => o.amount === EXPECTED.amountPaise && o.currency === EXPECTED.currency)?.id;
+  if (orderId) {
+    await updateOrderNotes(orderId, notes).catch(() => {}); // keep the newest details; not critical
+  } else {
+    orderId = (await createOrder({ amount: EXPECTED.amountPaise, currency: EXPECTED.currency, receipt, notes })).id;
   }
 
   return {
     provider: "razorpay",
     keyId,
     orderId,
-    registrationId,
-    amountPaise: workshop.pricePaise,
-    currency: workshop.currency,
+    amountPaise: EXPECTED.amountPaise,
+    currency: EXPECTED.currency,
     name: workshop.name,
     description: `${workshop.format} · ${workshop.day} ${workshop.time}`,
     prefill: { name: details.name, email: details.email, contact: details.phone },
   };
 }
 
-function utmNotes(a: Attribution): Record<string, string> {
-  const out: Record<string, string> = {};
+/** Razorpay notes: max 15 keys, values up to 256 chars. This is the customer record shown in the dashboard. */
+function buildNotes(details: RegistrationDetails, a: Attribution, ctx: CheckoutContext): Record<string, string> {
+  const notes: Record<string, string> = {
+    product: PRODUCT,
+    name: details.name.slice(0, 100),
+    email: details.email.slice(0, 120),
+    phone: details.phone,
+  };
   for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"] as const) {
-    if (a[k]) out[k] = a[k]!.slice(0, 200);
+    if (a[k]) notes[k] = a[k]!.slice(0, 200);
   }
-  return out;
+  if (ctx.fbp) notes.fbp = ctx.fbp.slice(0, 100);
+  if (ctx.fbc) notes.fbc = ctx.fbc.slice(0, 200);
+  if (ctx.eventSourceUrl) notes.source_url = ctx.eventSourceUrl.slice(0, 250);
+  return notes;
 }
 
 // ---- Access to the confirmation page ---------------------------------------------------------
-// The registration id is an unguessable UUID, and on top of that the page needs a cookie that the
-// server only sets after it has verified the payment in this browser. A copied URL alone shows nothing.
 
 export const ACCESS_COOKIE = "htnb_reg";
 export const ACCESS_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
-function accessSig(registrationId: string): string {
-  return createHmac("sha256", paymentConfig().keySecret).update(`access|${registrationId}`).digest("hex");
-}
-
-export function createAccessToken(registrationId: string): string {
-  return `${registrationId}.${accessSig(registrationId)}`;
-}
-
-export function accessTokenMatches(registrationId: string, token: string | undefined): boolean {
-  if (!token || !paymentConfig().keySecret) return false;
-  const expected = Buffer.from(createAccessToken(registrationId));
-  const got = Buffer.from(token);
-  return expected.length === got.length && timingSafeEqual(expected, got);
-}
+export const createAccessToken = (c: { orderId: string; paymentId: string; name: string }) =>
+  signAccess(c, paymentConfig().keySecret);
 
 export type RegistrationView =
   | { state: "paid"; registration: VerifiedRegistration }
-  | { state: "pending" } // known to this browser but not confirmed yet (webhook may still be on its way)
+  | { state: "pending" } // signed in this browser, but Razorpay hasn't captured the payment yet
   | { state: "none" };
 
-/** What the success page may show. Reveals nothing unless the cookie proves this browser paid. */
-export async function getRegistrationView(
-  registrationId: string | undefined,
-  accessToken: string | undefined,
-): Promise<RegistrationView> {
-  if (!registrationId || !accessTokenMatches(registrationId, accessToken)) return { state: "none" };
-  const reg = await redisPaymentStore.getRegistration(registrationId);
-  if (!reg) return { state: "none" };
-  if (reg.status !== "PAID" || !reg.orderId || !reg.paymentId) return { state: "pending" };
-  return {
-    state: "paid",
-    registration: {
-      registrationId,
-      orderId: reg.orderId,
-      paymentId: reg.paymentId,
-      amountPaise: reg.amountPaise,
-      currency: reg.currency,
-      purchaseEventId: reg.purchaseEventId ?? registrationId,
-      verifiedAt: reg.paidAt ?? "",
-      name: reg.name ?? "",
-    },
-  };
+/** What the success page may show. Needs the signed cookie AND a live confirmation from Razorpay. */
+export async function getRegistrationView(orderId: string | undefined, token: string | undefined): Promise<RegistrationView> {
+  const claims = readAccessToken(token, paymentConfig().keySecret);
+  if (!claims || !orderId || claims.o !== orderId) return { state: "none" };
+  try {
+    const r = await checkPayment(claims.o, claims.p, { expected: EXPECTED, fetchPayment, fetchOrder: loadOrder });
+    if (r.status === "invalid") return { state: "none" };
+    if (r.status === "pending") return { state: "pending" };
+    return {
+      state: "paid",
+      registration: {
+        orderId: r.orderId,
+        paymentId: r.paymentId,
+        amountPaise: EXPECTED.amountPaise,
+        currency: EXPECTED.currency,
+        purchaseEventId: purchaseEventId(r.paymentId),
+        name: claims.n || r.name,
+      },
+    };
+  } catch {
+    return { state: "pending" }; // Razorpay unreachable: don't show an error, the page retries automatically
+  }
+}
+
+export async function loadOrder(id: string) {
+  const o = await fetchOrder(id);
+  return { amount: o.amount, currency: o.currency, notes: orderNotes(o) };
 }
 
 /** Official workshop WhatsApp group. Server-only so it is revealed only after verified payment. */

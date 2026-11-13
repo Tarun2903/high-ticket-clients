@@ -1,5 +1,5 @@
 // Thank-you page. Renders the confirmation and the WhatsApp group link ONLY when
-//   (a) the registration is PAID in the database (set after server-side verification / signed webhook), and
+//   (a) Razorpay itself confirms the payment as captured, for our order and amount (live check), and
 //   (b) this browser holds the signed access cookie the verify route issued after the payment.
 // Typing or sharing the URL proves nothing: without both, you only get the "couldn't confirm" state.
 import type { Metadata } from "next";
@@ -10,17 +10,16 @@ import { WhatsAppLogo } from "@/components/WhatsAppLogo";
 import { AutoRefresh } from "@/components/payment/AutoRefresh";
 import { PurchaseTracker } from "@/components/tracking/PurchaseTracker";
 import { ACCESS_COOKIE, getRegistrationView, whatsappGroupUrl } from "@/lib/payment/server";
-import { redisConfigured } from "@/lib/payment/store";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Registration confirmed", robots: { index: false, follow: false } };
 
-type Props = { searchParams: Promise<{ registration?: string; preview?: string }> };
+type Props = { searchParams: Promise<{ order?: string; preview?: string }> };
 
 export default async function PaymentSuccessPage({ searchParams }: Props) {
-  const { registration, preview } = await searchParams;
+  const { order, preview } = await searchParams;
   const token = (await cookies()).get(ACCESS_COOKIE)?.value;
-  const view = redisConfigured() ? await getRegistrationView(registration, token) : ({ state: "none" } as const);
+  const view = await getRegistrationView(order, token);
 
   // Local design review only: `next dev` + ?preview=1. Never available in production builds.
   const isDesignPreview = view.state !== "paid" && preview === "1" && process.env.NODE_ENV === "development";

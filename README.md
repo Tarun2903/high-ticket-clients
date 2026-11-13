@@ -34,7 +34,7 @@ lib/tracking/              attribution (UTM/fbclid) + browser events (Pixel / da
 lib/meta.ts                Conversions API payload + hashing
 app/api/checkout           create order (Phase 1: returns "unavailable")
 app/api/payments/verify    verify Razorpay signature (Phase 2 placeholder, returns 501)
-app/api/razorpay/webhook   Razorpay webhook: signature check, idempotent paid/failed updates in Upstash Redis
+app/api/razorpay/webhook   Razorpay webhook: signature check + live confirmation (no database; Razorpay is the record)
 app/api/events             CAPI relay for ViewContent / InitiateCheckout (rejects Purchase)
 app/payment/success        shows WhatsApp link ONLY for a server-verified registration
 app/payment/failed         retry page
