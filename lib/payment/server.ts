@@ -62,7 +62,9 @@ export async function createCheckoutOrder(
   const receipt = receiptFor(details);
   const notes = buildNotes(details, attribution, ctx);
 
-  const existing = (await listOrdersByReceipt(receipt)).filter((o) => orderNotes(o).product === PRODUCT);
+  // The receipt is a hash only this app generates, so every order carrying it is this person's order for this workshop.
+  const existing = await listOrdersByReceipt(receipt);
+  console.info(JSON.stringify({ scope: "checkout", msg: "orders for receipt", found: existing.length, statuses: existing.map((o) => o.status) }));
   if (existing.some((o) => o.status === "paid")) throw new AlreadyRegisteredError();
 
   // Reuse an unpaid order for the same person (retry / reload / double click); otherwise create one.
