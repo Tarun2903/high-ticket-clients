@@ -77,15 +77,23 @@ let client: Redis | null = null;
 
 function redis(): Redis {
   if (client) return client;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const { url, token } = redisEnv();
   if (!url || !token) throw new Error("UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN are not set");
   client = new Redis({ url, token, automaticDeserialization: false }); // keep every value a plain string
   return client;
 }
 
+/** Upstash names, or the KV_* names the Vercel Marketplace integration injects. */
+function redisEnv() {
+  return {
+    url: process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN,
+  };
+}
+
 export function redisConfigured(): boolean {
-  return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+  const { url, token } = redisEnv();
+  return Boolean(url && token);
 }
 
 // ---- Used by the checkout route -------------------------------------------------------------
