@@ -38,7 +38,7 @@ export type PaymentVerificationRequest = {
   razorpay_signature: string;
 };
 
-export type RegistrationStatus = "pending_payment" | "paid" | "failed";
+export type RegistrationStatus = "PENDING" | "PAID" | "FAILED";
 
 /** A registration whose payment signature has been verified server-side. */
 export type VerifiedRegistration = {
@@ -50,4 +50,5 @@ export type VerifiedRegistration = {
   /** event_id used for the server CAPI Purchase event; reused by the browser Pixel for dedup. */
   purchaseEventId: string;
   verifiedAt: string;
+  name: string;
 };

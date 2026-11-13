@@ -9,6 +9,7 @@ import { priceLabel, workshop } from "@/lib/workshop";
 type State =
   | { kind: "idle" }
   | { kind: "submitting" }
+  | { kind: "cancelled" }
   | { kind: "unavailable"; message: string }
   | { kind: "error"; message: string };
 
@@ -25,6 +26,7 @@ export function RegistrationDialog({ ref }: { ref: Ref<HTMLDialogElement> }) {
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (state.kind === "submitting") return;
+    const dialog = e.currentTarget.closest("dialog");
 
     const form = new FormData(e.currentTarget);
     const check = validateRegistration({ name: form.get("name"), email: form.get("email"), phone: form.get("phone") });
@@ -35,14 +37,17 @@ export function RegistrationDialog({ ref }: { ref: Ref<HTMLDialogElement> }) {
 
     setErrors({});
     setState({ kind: "submitting" });
-    const result = await startCheckout(check.details);
+    // The Razorpay popup opens over the landing page. This dialog is a top-layer modal and would cover it,
+    // so it closes first; if the customer cancels or the payment fails it comes back with the form still filled.
+    const result = await startCheckout(check.details, { onBeforeOpen: () => dialog?.close() });
 
-    if (result.status === "opened") return setState({ kind: "idle" });
+    if (result.status === "paid") return setState({ kind: "idle" }); // navigating to the confirmation page
+    if (dialog && !dialog.open) dialog.showModal();
     if (result.status === "invalid") {
       setErrors(result.errors);
       return setState({ kind: "idle" });
     }
-    setState({ kind: result.status, message: result.message });
+    setState(result.status === "cancelled" ? { kind: "cancelled" } : { kind: result.status, message: result.message });
   }
 
   function onBackdropClick(e: MouseEvent<HTMLDialogElement>) {
@@ -78,6 +83,12 @@ export function RegistrationDialog({ ref }: { ref: Ref<HTMLDialogElement> }) {
           </li>
         </ul>
 
+        {state.kind === "cancelled" && (
+          <div className="notice notice--info" role="status">
+            <Icon name="alert" size={20} />
+            <p>Payment wasn&apos;t completed – you haven&apos;t been charged. Your details are saved, so you can try again below.</p>
+          </div>
+        )}
         {state.kind === "unavailable" && (
           <div className="notice notice--info" role="status">
             <Icon name="alert" size={20} />
@@ -118,12 +129,12 @@ export function RegistrationDialog({ ref }: { ref: Ref<HTMLDialogElement> }) {
           </div>
 
           <button type="submit" className="btn-cta btn-cta--lg btn-cta--block" disabled={submitting}>
-            <span>{submitting ? "Please wait…" : `CONTINUE TO PAY ${priceLabel}`}</span>
+            <span>{submitting ? "Please wait…" : state.kind === "cancelled" ? `TRY AGAIN – PAY ${priceLabel}` : `CONTINUE TO PAY ${priceLabel}`}</span>
             {!submitting && <Icon name="arrowRight" size={20} className="btn-cta__icon" />}
           </button>
           <p className="reg-form__secure">
-            <Icon name="lock" size={14} /> After successful payment you&apos;ll be redirected to the workshop WhatsApp
-            group.
+            <Icon name="lock" size={14} /> Secure payment by Razorpay. After payment you&apos;ll get your confirmation and the
+            workshop WhatsApp group link.
           </p>
         </form>
       </div>

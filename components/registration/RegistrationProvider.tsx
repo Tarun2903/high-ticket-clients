@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, type ReactNode } from "react";
+import { preloadCheckout } from "@/lib/payment/client";
 import { trackEvent } from "@/lib/tracking/client";
 import { RegistrationDialog } from "./RegistrationDialog";
 
@@ -18,6 +19,7 @@ export function RegistrationProvider({ children }: { children: ReactNode }) {
 
   const openRegistration = useCallback(() => {
     trackEvent("InitiateCheckout");
+    preloadCheckout();
     const dialog = dialogRef.current;
     if (dialog && !dialog.open) dialog.showModal();
   }, []);

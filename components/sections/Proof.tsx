@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { Icon } from "@/components/Icon";
 import { Placeholder } from "@/components/Placeholder";
 import { audience, caseStudies, host } from "@/lib/content";
@@ -54,22 +53,7 @@ export function CaseStudies() {
 export function Host() {
   return (
     <section className="section section--ivory" aria-labelledby="host-title">
-      <div className="container host">
-        <div className="host__media reveal">
-          {host.photo ? (
-            <Image
-              src={host.photo}
-              alt="Melroy, host of The High-Ticket Numerology Blueprint"
-              width={800}
-              height={1000}
-              sizes="(min-width: 960px) 420px, 100vw"
-              className="host__photo"
-            />
-          ) : (
-            <Placeholder label={host.photoNote} icon="user" ratio="4 / 5" />
-          )}
-        </div>
-
+      <div className="container host host--solo">
         <div className="host__body reveal">
           <p className="kicker">Meet your host</p>
           <h2 id="host-title" className="display h2">
@@ -94,7 +78,6 @@ export function Host() {
               </li>
             ))}
           </ul>
-          <p className="team-note">{host.achievementsNote}</p>
         </div>
       </div>
     </section>
