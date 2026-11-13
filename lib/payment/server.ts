@@ -16,6 +16,7 @@ import {
   claimRegistrationKey,
   findRegistrationIdByKey,
   linkOrder,
+  redisConfigured,
   redisPaymentStore,
   saveRegistration,
   type RegistrationRecord,
@@ -48,7 +49,8 @@ export function paymentConfig() {
 
 export function paymentsEnabled(): boolean {
   const c = paymentConfig();
-  return c.enabled && Boolean(c.keyId && c.keySecret);
+  // Redis is required to record registrations/payments; without it, refuse cleanly instead of failing mid-checkout.
+  return c.enabled && Boolean(c.keyId && c.keySecret) && redisConfigured();
 }
 
 // ---- Razorpay REST API (server only, Basic auth with key_id:key_secret) ----------------------
