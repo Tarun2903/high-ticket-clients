@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useRegistration } from "@/components/registration/RegistrationProvider";
@@ -19,7 +20,7 @@ export function ResultsGallery() {
   return (
     <>
       <div className="results__grid">
-        {caseStudies.map((study, i) => (
+        {caseStudies.map((study) => (
           <article key={study.id} className="result-card reveal">
             <p className="result-card__tag">{study.category}</p>
 
@@ -30,14 +31,13 @@ export function ResultsGallery() {
               aria-haspopup="dialog"
               aria-label={`View the full ${study.category.toLowerCase()} results screenshot`}
             >
-              {/* Plain <img>: the files are served as-is from /public so every figure stays pixel-exact and readable. */}
-              <img
+              {/* Card thumbnails are resized AVIF/WebP (small on mobile data); the lightbox below opens the untouched original, so every figure stays readable. */}
+              <Image
                 src={study.image}
                 alt={study.alt}
                 width={study.width}
                 height={study.height}
-                loading={i === 0 ? "eager" : "lazy"}
-                decoding="async"
+                sizes="(min-width: 960px) 380px, (min-width: 640px) 46vw, 92vw"
               />
               <span className="result-card__zoom" aria-hidden="true">
                 View full image
