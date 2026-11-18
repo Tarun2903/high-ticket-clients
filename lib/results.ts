@@ -1,6 +1,12 @@
 // Client results shown in the "Real clients. Real results." gallery.
 // Figures are copied exactly from the original screenshots in public/images/testimonials/ – do not "fix" or round them.
 
+/**
+ * Bump this whenever a file in public/images/testimonials/ is replaced. The card thumbnails are resized copies that
+ * browsers and the image optimizer cache for hours; a new version makes every visitor fetch the fresh picture.
+ */
+export const imageVersion = "2";
+
 export type ResultStage = {
   /** Column heading, e.g. "After 1 month". */
   label: string;

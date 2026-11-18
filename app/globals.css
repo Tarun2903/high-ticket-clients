@@ -2731,3 +2731,37 @@ body:has(.status) .status {
     bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* =========================================================================
+   Phone typography – compact, easy-to-scan text (everything sized in rem scales with the root size)
+   ========================================================================= */
+@media (max-width: 639px) {
+  html {
+    font-size: 93.75%; /* 15px root: body text ~16px (was 17px); small labels stay >= ~10.5px */
+  }
+
+  .hero__title {
+    font-size: clamp(2rem, 8.6vw, 2.5rem);
+    line-height: 1.12;
+  }
+
+  .h2 {
+    font-size: clamp(1.7rem, 7.2vw, 2.1rem);
+    line-height: 1.18;
+  }
+
+  .final__title {
+    font-size: clamp(1.8rem, 7.8vw, 2.3rem);
+  }
+
+  /* Form fields must stay >= 16px or iOS Safari zooms the page when one is tapped. */
+  .field input {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 479px) {
+  .hero .eyebrow {
+    font-size: 0.72rem; /* ~10.8px; the label wraps on very narrow phones instead of shrinking */
+  }
+}

@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useRegistration } from "@/components/registration/RegistrationProvider";
-import { caseStudies, metricRows, resultsSection, type CaseStudy } from "@/lib/results";
+import { caseStudies, imageVersion, metricRows, resultsSection, type CaseStudy } from "@/lib/results";
 
 /** Three case-study cards, a lightbox for the original screenshots, and the closing CTA. */
 export function ResultsGallery() {
@@ -33,7 +33,7 @@ export function ResultsGallery() {
             >
               {/* Card thumbnails are resized AVIF/WebP (small on mobile data); the lightbox below opens the untouched original, so every figure stays readable. */}
               <Image
-                src={study.image}
+                src={`${study.image}?v=${imageVersion}`}
                 alt={study.alt}
                 width={study.width}
                 height={study.height}
@@ -99,7 +99,7 @@ export function ResultsGallery() {
         </form>
         {active && (
           <div className="lightbox__scroll" onClick={(e) => e.target === e.currentTarget && dialogRef.current?.close()}>
-            <img className="lightbox__img" src={active.image} alt={active.alt} decoding="async" />
+            <img className="lightbox__img" src={`${active.image}?v=${imageVersion}`} alt={active.alt} decoding="async" />
           </div>
         )}
       </dialog>
