@@ -1,7 +1,8 @@
 // POST /api/checkout – creates (or reuses) the Razorpay order; customer details are stored as order notes.
 // The amount comes from lib/workshop.ts on the server; the browser can't influence it.
-import { NextResponse, type NextRequest } from "next/server";
-import { fbcFromFbclid } from "@/lib/meta";
+import { after, NextResponse, type NextRequest } from "next/server";
+import { fbcFromFbclid, sendCapiEvent } from "@/lib/meta";
+import { workshopEventData } from "@/lib/workshop";
 import { validateRegistration } from "@/lib/registration";
 import { sanitizeAttribution } from "@/lib/tracking/attribution";
 import { AlreadyRegisteredError, createCheckoutOrder, PaymentsUnavailableError } from "@/lib/payment/server";
@@ -26,13 +27,38 @@ export async function POST(req: NextRequest) {
 
   const attribution = sanitizeAttribution(body.attribution);
   const eventSourceUrl = typeof body.eventSourceUrl === "string" ? body.eventSourceUrl.slice(0, 500) : undefined;
+  const fbp = req.cookies.get("_fbp")?.value;
+  const fbc = req.cookies.get("_fbc")?.value ?? fbcFromFbclid(attribution.fbclid);
+
+  // Lead (CAPI copy of the browser Pixel Lead, same event_id). Sent after the response so checkout isn't slowed.
+  const leadEventId = typeof body.leadEventId === "string" ? body.leadEventId.slice(0, 100) : "";
+  if (leadEventId) {
+    const { details } = result;
+    const [firstName, ...rest] = details.name.split(/\s+/);
+    const user = {
+      email: details.email,
+      phone: details.phone,
+      firstName,
+      lastName: rest.join(" ") || undefined,
+      clientIp: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined,
+      userAgent: req.headers.get("user-agent") || undefined,
+      fbp,
+      fbc,
+    };
+    after(async () => {
+      const r = await sendCapiEvent({
+        eventName: "Lead",
+        eventId: leadEventId,
+        eventSourceUrl: eventSourceUrl || req.nextUrl.origin,
+        user,
+        customData: workshopEventData(),
+      });
+      if (!r.sent) console.info(JSON.stringify({ scope: "checkout", msg: "CAPI Lead not sent", reason: r.error }));
+    });
+  }
 
   try {
-    const order = await createCheckoutOrder(result.details, attribution, {
-      eventSourceUrl,
-      fbp: req.cookies.get("_fbp")?.value,
-      fbc: req.cookies.get("_fbc")?.value ?? fbcFromFbclid(attribution.fbclid),
-    });
+    const order = await createCheckoutOrder(result.details, attribution, { eventSourceUrl, fbp, fbc });
     return json({ status: "ready", order }, 200);
   } catch (err) {
     if (err instanceof PaymentsUnavailableError) return json({ status: "unavailable", message: UNAVAILABLE_MESSAGE }, 503);

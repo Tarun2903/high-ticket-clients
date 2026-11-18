@@ -2,7 +2,8 @@
 // Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }.
 // Nothing here trusts the browser: see lib/payment/verify.ts. On success it sets the signed access
 // cookie that lets this browser (and only this browser) open /payment/success.
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
+import { trackPurchase } from "@/lib/payment/purchase";
 import { verifyPaymentSignature } from "@/lib/payment/signature";
 import {
   ACCESS_COOKIE,
@@ -45,6 +46,28 @@ export async function POST(req: NextRequest) {
     if (result.status === "invalid") {
       console.warn(JSON.stringify({ scope: "verify", msg: "verification rejected", orderId: input.razorpay_order_id }));
       return reply({ status: "invalid" }, 400);
+    }
+
+    // Server Purchase event (CAPI). The webhook sends the same event_id, so Meta counts it once – this copy
+    // just makes sure the sale reaches Meta even if the webhook is delayed or not configured.
+    if (result.status === "paid") {
+      const { orderId, paymentId } = result;
+      const clientIp = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
+      const userAgent = req.headers.get("user-agent") || undefined;
+      after(async () => {
+        const { notes } = await loadOrder(orderId);
+        await trackPurchase({
+          paymentId,
+          email: notes.email,
+          phone: notes.phone,
+          name: notes.name,
+          eventSourceUrl: notes.source_url,
+          fbp: notes.fbp ?? req.cookies.get("_fbp")?.value,
+          fbc: notes.fbc ?? req.cookies.get("_fbc")?.value,
+          clientIp,
+          userAgent,
+        });
+      });
     }
 
     // paid, or signature-valid but not captured yet (success page waits for it). Either way this browser gets its cookie.

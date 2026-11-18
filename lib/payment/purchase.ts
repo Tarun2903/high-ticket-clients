@@ -13,6 +13,8 @@ export async function trackPurchase(p: {
   eventSourceUrl?: string;
   fbp?: string;
   fbc?: string;
+  clientIp?: string;
+  userAgent?: string;
 }): Promise<void> {
   try {
     const [firstName, ...rest] = (p.name ?? "").trim().split(/\s+/);
@@ -27,6 +29,8 @@ export async function trackPurchase(p: {
         lastName: rest.join(" ") || undefined,
         fbp: p.fbp,
         fbc: p.fbc,
+        clientIp: p.clientIp,
+        userAgent: p.userAgent,
       },
       customData: workshopEventData(),
     });

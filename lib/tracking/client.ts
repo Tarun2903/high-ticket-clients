@@ -4,6 +4,8 @@
 //   PageView          – fired by the Pixel base code on every page load (components/Analytics.tsx)
 //   ViewContent       – landing page viewed           -> trackEvent("ViewContent")
 //   InitiateCheckout  – registration/payment started  -> trackEvent("InitiateCheckout")
+//   Lead              – registration form submitted with valid details -> trackLead();
+//                       the CAPI copy (hashed email/phone) is sent by /api/checkout with the same event_id.
 //   Purchase          – ONLY after the backend has verified the Razorpay signature.
 //                       Server fires it via CAPI; the success page fires the browser
 //                       copy with the same event_id (trackVerifiedPurchase). Never from a CTA.
@@ -60,6 +62,23 @@ export function trackEvent(name: BrowserEvent): void {
   } catch {
     /* tracking must never break the page */
   }
+}
+
+let leadEventId: string | null = null;
+
+/**
+ * Lead – the registration form was submitted with valid name / email / WhatsApp number.
+ * Fires the Pixel once per page and returns the event_id; send it to /api/checkout, which fires the
+ * Conversions API copy (with hashed contact details) so Meta deduplicates the two. Re-submits reuse the id.
+ */
+export function trackLead(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  if (leadEventId) return leadEventId;
+  leadEventId = newEventId();
+  const data = workshopEventData();
+  pixel("track", "Lead", data, { eventID: leadEventId });
+  pushDataLayer("Lead", { event_id: leadEventId, ...data });
+  return leadEventId;
 }
 
 /**

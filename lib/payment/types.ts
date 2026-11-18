@@ -9,6 +9,8 @@ export type CheckoutRequest = {
   details: RegistrationDetails;
   attribution: Attribution;
   eventSourceUrl: string;
+  /** event_id of the browser Pixel Lead event; the server sends the CAPI Lead with the same id. */
+  leadEventId?: string;
 };
 
 /** What Razorpay Checkout needs to open. key_id is public by design; the secret never leaves the server. */

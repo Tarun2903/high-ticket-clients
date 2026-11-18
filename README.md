@@ -60,10 +60,12 @@ and the two `app/api/payments/*` routes. A database is needed for registrations 
 | PageView | page load | Pixel base code | – |
 | ViewContent | landing page viewed (once) | `trackEvent` | `/api/events`, same event_id |
 | InitiateCheckout | registration dialog opened (once per page) | `trackEvent` | `/api/events`, same event_id |
-| Purchase | **only after verified payment** | success page, server's event_id, guarded against refresh | verify route (Phase 2) |
+| Lead | registration form submitted with valid details | `trackLead` | `/api/checkout`, same event_id, hashed email/phone/name |
+| Purchase | **only after verified payment** | success page, server's event_id, guarded against refresh | verify route + Razorpay webhook (same event_id → counted once) |
 
+- Pixel ID `1571576558333946` is the default in `lib/meta.ts` (override with `NEXT_PUBLIC_META_PIXEL_ID`).
 - UTM params + `fbclid` are stored in `sessionStorage` and sent with the checkout request.
-- Funnel events send no contact details to Meta; Purchase sends hashed email/phone only.
+- ViewContent / InitiateCheckout send no contact details to Meta; Lead and Purchase send hashed email/phone/name only.
 - If you set `NEXT_PUBLIC_GTM_ID`, events are also pushed to `dataLayer`. Don't add Meta tags inside GTM too.
 
 ## Before running ads

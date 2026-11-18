@@ -5,7 +5,7 @@ import { formatInr, workshop } from "../lib/workshop.ts";
 import { normalizeWhatsApp, validateRegistration } from "../lib/registration.ts";
 import { parseAttribution, sanitizeAttribution } from "../lib/tracking/attribution.ts";
 import { verifyPaymentSignature, verifyWebhookSignature } from "../lib/payment/signature.ts";
-import { buildCapiPayload, fbcFromFbclid, sha256 } from "../lib/meta.ts";
+import { buildCapiPayload, fbcFromFbclid, META_PIXEL_ID, sha256 } from "../lib/meta.ts";
 
 test("price is ₹9 and formats correctly", () => {
   assert.equal(workshop.pricePaise, 900);
@@ -78,4 +78,23 @@ test("CAPI payload: funnel events carry no PII, purchase PII is hashed", () => {
   assert.deepEqual(purchase.user_data.em, [sha256("a@b.com")]);
   assert.deepEqual(purchase.user_data.ph, [sha256("919876543210")]);
   assert.equal(fbcFromFbclid("abc", 1), "fb.1.1.abc");
+});
+
+test("Meta Pixel ID defaults to the workshop pixel", () => {
+  if (!process.env.NEXT_PUBLIC_META_PIXEL_ID) assert.equal(META_PIXEL_ID, "1571576558333946");
+  assert.match(META_PIXEL_ID, /^\d+$/);
+});
+
+test("CAPI Lead carries hashed contact details and the browser event_id", () => {
+  const lead = buildCapiPayload({
+    eventName: "Lead",
+    eventId: "lead-123",
+    eventSourceUrl: "https://x",
+    user: { email: "asha@example.com", phone: "919876543210", firstName: "Asha", lastName: "Rao", fbp: "fb.1.1.1" },
+  }).data[0];
+  assert.equal(lead.event_name, "Lead");
+  assert.equal(lead.event_id, "lead-123");
+  assert.deepEqual(lead.user_data.em, [sha256("asha@example.com")]);
+  assert.deepEqual(lead.user_data.fn, [sha256("asha")]);
+  assert.equal(lead.user_data.fbp, "fb.1.1.1");
 });

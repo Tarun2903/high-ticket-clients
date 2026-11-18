@@ -2,6 +2,10 @@
 // Browser Pixel + server CAPI events share the same event_id so Meta deduplicates them.
 import { createHash } from "node:crypto";
 
+// Meta Pixel ID – public by design (it ships to every browser), so it lives in code with an env override.
+// Digits only, so nothing unexpected can be injected into the inline Pixel script (app/layout.tsx).
+export const META_PIXEL_ID = (process.env.NEXT_PUBLIC_META_PIXEL_ID || "1571576558333946").replace(/\D/g, "");
+
 export type CapiUser = {
   email?: string;
   phone?: string;
@@ -81,7 +85,7 @@ export function buildCapiPayload(event: CapiEvent, testEventCode?: string) {
 }
 
 export async function sendCapiEvent(event: CapiEvent): Promise<{ sent: boolean; error?: string }> {
-  const pixelId = process.env.NEXT_PUBLIC_META_PIXEL_ID;
+  const pixelId = META_PIXEL_ID;
   const token = process.env.META_CAPI_ACCESS_TOKEN;
   if (!pixelId || !token) return { sent: false, error: "CAPI not configured" };
 

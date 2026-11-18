@@ -6,6 +6,7 @@
 
 import type { RegistrationDetails } from "@/lib/registration";
 import { getAttribution } from "@/lib/tracking/attribution";
+import { trackLead } from "@/lib/tracking/client";
 import type { CheckoutOrder, CheckoutRequest, CheckoutResponse } from "./types";
 
 export type StartCheckoutResult =
@@ -62,6 +63,7 @@ export async function startCheckout(
     details,
     attribution: getAttribution(),
     eventSourceUrl: window.location.href,
+    leadEventId: trackLead(), // details already passed client-side validation: this person is a lead
   };
 
   let data: CheckoutResponse;
